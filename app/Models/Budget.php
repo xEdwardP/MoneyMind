@@ -10,7 +10,7 @@ class Budget extends Model
 
     protected $fillable = [
         'user_id',
-        'tycategory_idpe',
+        'category_id',
         'assignedAmount',
         'spentAmount',
         'start_date',

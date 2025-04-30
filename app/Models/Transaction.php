@@ -22,9 +22,28 @@ class Transaction extends Model
     {
         return $this->belongsTo(User::class);
     }
-    
+
     public function category()
     {
         return $this->belongsTo(Category::class);
+    }
+
+    protected static function booted()
+    {
+        static::created(function ($transaction) {
+            if ($transaction->type == 'gasto') {
+                $budget = Budget::where('user_id', $transaction->user_id)
+                    ->where('category_id', $transaction->category_id)
+                    ->whereMonth('start_date', now()->month)
+                    ->whereYear('start_date', now()->year)
+                    ->first();
+
+                if ($budget) {
+                    // $budget->spentAmount += $transaction->amount;
+                    // $budget->save();
+                    $budget->increment('spentAmount', $transaction->amount);
+                }
+            }
+        });
     }
 }

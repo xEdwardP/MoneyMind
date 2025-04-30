@@ -24,7 +24,7 @@ class TransactionResource extends Resource
 {
     protected static ?string $model = Transaction::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
+    protected static ?string $navigationIcon = 'heroicon-o-currency-dollar';
 
     protected static ?string $modelLabel = 'Movimiento';
 
@@ -36,7 +36,7 @@ class TransactionResource extends Resource
     {
         return $form
             ->schema([
-                Card::make('Datos Generales de la Categoría')
+                Card::make('Datos Generales de la transacción')
                     ->schema([
                         Forms\Components\Grid::make(2)
                             ->schema([
