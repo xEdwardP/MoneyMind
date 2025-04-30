@@ -105,7 +105,7 @@ class CategoryResource extends Resource
                     ->successNotification(
                         Notification::make()
                             ->title('Categoria eliminada')
-                            ->body('La categoria se ha sido eliminado exitosamente.')
+                            ->body('La categoria se ha eliminado exitosamente.')
                             ->success()
                     ),
             ])

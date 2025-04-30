@@ -11,10 +11,11 @@ class Transaction extends Model
     protected $fillable = [
         'user_id',
         'category_id',
-        'assignedAmount',
-        'spentAmount',
-        'start_date',
-        'end_date',
+        'type',
+        'amount',
+        'description',
+        'photo',
+        'transaction_date'
     ];
 
     public function user()
