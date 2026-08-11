@@ -2,6 +2,5 @@
 
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+// La aplicación vive por completo dentro del panel de Filament.
+Route::redirect('/', '/admin');

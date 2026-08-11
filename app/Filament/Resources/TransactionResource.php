@@ -3,22 +3,17 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\TransactionResource\Pages;
-use App\Filament\Resources\TransactionResource\RelationManagers;
 use App\Models\Category;
 use App\Models\Transaction;
-use App\Models\User;
 use Filament\Forms;
-use Filament\Forms\Components\Card;
+use Filament\Forms\Components\Section;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
-use Filament\Support\RawJs;
 use Filament\Tables;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
-use Illuminate\Validation\Rules\Numeric;
 
 class TransactionResource extends Resource
 {
@@ -36,54 +31,63 @@ class TransactionResource extends Resource
     {
         return $form
             ->schema([
-                Card::make('Datos Generales de la transacción')
+                Section::make('Datos Generales de la transacción')
                     ->schema([
-                        Forms\Components\Grid::make(2)
-                            ->schema([
-                                Forms\Components\Select::make('user_id')
-                                    ->required()
-                                    ->label('Usuario')
-                                    ->placeholder('Selecciona un usuario')
-                                    ->options(User::all()->pluck('name', 'id')),
-                                Forms\Components\Select::make('category_id')
-                                    ->required()
-                                    ->label('Categoría')
-                                    ->placeholder('Selecciona una categoría')
-                                    ->options(Category::all()->pluck('name', 'id')),
-                                Forms\Components\Select::make('type')
-                                    ->label('Tipo de movimiento')
-                                    ->placeholder('Selecciona el tipo de movimiento')
-                                    ->required()
-                                    ->options([
-                                        'ingreso' => 'Ingreso',
-                                        'gasto' => 'Gasto',
-                                    ]),
-                                Forms\Components\TextInput::make('amount')
-                                    ->label('Monto')
-                                    ->required()
-                                    ->numeric(),
-                                Forms\Components\RichEditor::make('description')
-                                    ->label('Descripción')
-                                    ->placeholder('Descripción del movimiento')
-                                    ->columnSpanFull(),
-                                Forms\Components\FileUpload::make('photo')
-                                    ->label('Foto')
-                                    ->placeholder('Selecciona una foto')
-                                    ->image()
-                                    ->disk('public')
-                                    ->directory('transactions'),
-                                Forms\Components\DatePicker::make('transaction_date')
-                                    ->label('Fecha del movimiento')
-                                    ->placeholder('Selecciona la fecha del movimiento')
-                                    ->default(now())
-                                    ->minDate(now()->subYear(1))
-                                    ->maxDate(now()->addYear(1))
-                                    ->required(),
-                            ])
-                            ->columns(2),
+                        Forms\Components\Select::make('user_id')
+                            ->required()
+                            ->label('Usuario')
+                            ->placeholder('Selecciona un usuario')
+                            ->relationship('user', 'name')
+                            ->searchable()
+                            ->preload(),
+                        Forms\Components\Select::make('type')
+                            ->label('Tipo de movimiento')
+                            ->placeholder('Selecciona el tipo de movimiento')
+                            ->required()
+                            ->native(false)
+                            ->options(CategoryResource::TYPES)
+                            // Al cambiar el tipo se limpia la categoría, porque las
+                            // categorías disponibles dependen del tipo elegido.
+                            ->live()
+                            ->afterStateUpdated(fn (Forms\Set $set) => $set('category_id', null)),
+                        Forms\Components\Select::make('category_id')
+                            ->required()
+                            ->label('Categoría')
+                            ->placeholder('Selecciona una categoría')
+                            ->searchable()
+                            ->options(fn (Forms\Get $get): array => Category::query()
+                                ->when(
+                                    $get('type'),
+                                    fn (Builder $query, string $type) => $query->where('type', $type)
+                                )
+                                ->orderBy('name')
+                                ->pluck('name', 'id')
+                                ->all()),
+                        Forms\Components\TextInput::make('amount')
+                            ->label('Monto')
+                            ->required()
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->step(0.01)
+                            ->prefix('$'),
+                        Forms\Components\DatePicker::make('transaction_date')
+                            ->label('Fecha del movimiento')
+                            ->placeholder('Selecciona la fecha del movimiento')
+                            ->default(now())
+                            ->minDate(now()->subYear())
+                            ->maxDate(now()->addYear())
+                            ->required(),
+                        Forms\Components\FileUpload::make('photo')
+                            ->label('Foto')
+                            ->image()
+                            ->disk('public')
+                            ->directory('transactions'),
+                        Forms\Components\RichEditor::make('description')
+                            ->label('Descripción')
+                            ->placeholder('Descripción del movimiento')
+                            ->columnSpanFull(),
                     ])
-                    ->columns(1)
-                    ->columnSpan(2),
+                    ->columns(2),
             ]);
     }
 
@@ -105,22 +109,32 @@ class TransactionResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('type')
                     ->label('Tipo de movimiento')
+                    ->badge()
+                    ->alignCenter()
+                    ->formatStateUsing(fn (string $state): string => CategoryResource::TYPES[$state] ?? $state)
+                    ->color(fn (string $state): string => match ($state) {
+                        'ingreso' => 'success',
+                        'gasto' => 'danger',
+                        default => 'gray',
+                    })
                     ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('amount')
                     ->label('Monto')
-                    ->numeric()
-                    ->sortable(),
+                    ->numeric(decimalPlaces: 2)
+                    ->prefix('$ ')
+                    ->alignEnd()
+                    ->sortable()
+                    ->summarize(Tables\Columns\Summarizers\Sum::make()->label('Total')),
                 Tables\Columns\TextColumn::make('description')
                     ->label('Descripción')
-                    ->limit(50)
-                    ->html()
-                    ->searchable()
-                    ->sortable(),
+                    // La descripción viene del editor enriquecido, así que se limpia
+                    // el HTML antes de recortarla para no partir etiquetas a la mitad.
+                    ->formatStateUsing(fn (?string $state): string => str(strip_tags((string) $state))->squish()->limit(50))
+                    ->searchable(),
                 Tables\Columns\ImageColumn::make('photo')
                     ->label('Foto')
-                    ->searchable()
-                    // ->extraImgAttributes(['loading' => 'lazy'])
+                    ->disk('public')
                     ->height(100)
                     ->width(100),
                 Tables\Columns\TextColumn::make('transaction_date')
@@ -128,22 +142,34 @@ class TransactionResource extends Resource
                     ->date()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
+                    ->label('Creado')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('updated_at')
+                    ->label('Actualizado')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
+            ->defaultSort('transaction_date', 'desc')
             ->filters([
                 SelectFilter::make('type')
                     ->label('Tipo de movimiento')
-                    ->placeholder('Selecciona el tipo de movimiento')
-                    ->options([
-                        'ingreso' => 'Ingreso',
-                        'gasto' => 'Gasto',
-                    ]),
+                    ->placeholder('Todos')
+                    ->options(CategoryResource::TYPES),
+                SelectFilter::make('category_id')
+                    ->label('Categoría')
+                    ->placeholder('Todas')
+                    ->relationship('category', 'name')
+                    ->searchable()
+                    ->preload(),
+                SelectFilter::make('user_id')
+                    ->label('Usuario')
+                    ->placeholder('Todos')
+                    ->relationship('user', 'name')
+                    ->searchable()
+                    ->preload(),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),

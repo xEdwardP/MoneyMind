@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\BudgetResource\Pages;
 
 use App\Filament\Resources\BudgetResource;
-use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 
@@ -44,7 +43,7 @@ class CreateBudget extends CreateRecord
             $this->getCancelFormAction()
                 ->label('Cancelar')
                 ->color('warning')
-                ->icon('heroicon-o-arrow-left')
+                ->icon('heroicon-o-arrow-left'),
         ];
     }
 }

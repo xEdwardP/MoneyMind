@@ -3,19 +3,15 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\BudgetResource\Pages;
-use App\Filament\Resources\BudgetResource\RelationManagers;
 use App\Models\Budget;
-use App\Models\Category;
-use App\Models\User;
 use Filament\Forms;
-use Filament\Forms\Components\Card;
+use Filament\Forms\Components\Section;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class BudgetResource extends Resource
 {
@@ -33,46 +29,59 @@ class BudgetResource extends Resource
     {
         return $form
             ->schema([
-                Card::make('Datos Generales de el presupuesto')
+                Section::make('Datos Generales de el presupuesto')
                     ->schema([
-                        Forms\Components\Grid::make(2)
-                            ->schema([
-                                Forms\Components\Select::make('user_id')
-                                    ->required()
-                                    ->label('Usuario')
-                                    ->placeholder('Selecciona un usuario')
-                                    ->options(User::all()->pluck('name', 'id')),
-                                Forms\Components\Select::make('category_id')
-                                    ->required()
-                                    ->label('Categoría')
-                                    ->placeholder('Selecciona una categoría')
-                                    ->options(Category::all()->pluck('name', 'id')),
-                                Forms\Components\TextInput::make('assignedAmount')
-                                    ->required()
-                                    ->label('Monto Asignado')
-                                    ->placeholder('Monto Asignado')
-                                    ->numeric()
-                                    ->default(0.00),
-                                Forms\Components\TextInput::make('spentAmount')
-                                    ->required()
-                                    ->label('Monto Gastado')
-                                    ->placeholder('Monto Gastado')
-                                    ->numeric()
-                                    ->default(0.00)
-                                    ->disabled(),
-                                Forms\Components\DatePicker::make('start_date')
-                                    ->required()
-                                    ->label('Fecha de Inicio')
-                                    ->default(now()),
-                                Forms\Components\DatePicker::make('end_date')
-                                    ->required()
-                                    ->label('Fecha de Fin')
-                                    ->default(now()->addMonth()),
-                            ])
-                            ->columns(2),
+                        Forms\Components\Select::make('user_id')
+                            ->required()
+                            ->label('Usuario')
+                            ->placeholder('Selecciona un usuario')
+                            ->relationship('user', 'name')
+                            ->searchable()
+                            ->preload(),
+                        Forms\Components\Select::make('category_id')
+                            ->required()
+                            ->label('Categoría')
+                            ->placeholder('Selecciona una categoría')
+                            // Un presupuesto limita gastos, así que sólo tiene sentido
+                            // asignarlo a categorías de tipo "gasto".
+                            ->relationship(
+                                name: 'category',
+                                titleAttribute: 'name',
+                                modifyQueryUsing: fn (Builder $query) => $query->where('type', 'gasto'),
+                            )
+                            ->searchable()
+                            ->preload(),
+                        Forms\Components\TextInput::make('assignedAmount')
+                            ->required()
+                            ->label('Monto Asignado')
+                            ->placeholder('Monto Asignado')
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->step(0.01)
+                            ->prefix('$')
+                            ->default(0.00),
+                        Forms\Components\TextInput::make('spentAmount')
+                            ->label('Monto Gastado')
+                            ->numeric()
+                            ->prefix('$')
+                            ->default(0.00)
+                            // Se calcula a partir de los movimientos; nunca se envía.
+                            ->disabled()
+                            ->dehydrated(false)
+                            ->helperText('Se calcula automáticamente a partir de los movimientos del periodo.'),
+                        Forms\Components\DatePicker::make('start_date')
+                            ->required()
+                            ->label('Fecha de Inicio')
+                            ->default(now()->startOfMonth())
+                            ->live()
+                            ->beforeOrEqual('end_date'),
+                        Forms\Components\DatePicker::make('end_date')
+                            ->required()
+                            ->label('Fecha de Fin')
+                            ->default(now()->endOfMonth())
+                            ->afterOrEqual('start_date'),
                     ])
-                    ->columns(1)
-                    ->columnSpan(2),
+                    ->columns(2),
             ]);
     }
 
@@ -94,12 +103,27 @@ class BudgetResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('assignedAmount')
                     ->label('Monto Asignado')
-                    ->numeric()
+                    ->numeric(decimalPlaces: 2)
+                    ->prefix('$ ')
+                    ->alignEnd()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('spentAmount')
                     ->label('Monto Gastado')
-                    ->numeric()
+                    ->numeric(decimalPlaces: 2)
+                    ->prefix('$ ')
+                    ->alignEnd()
+                    ->color(fn (Budget $record): string => $record->spentAmount > $record->assignedAmount ? 'danger' : 'success')
                     ->sortable(),
+                Tables\Columns\TextColumn::make('usage_percentage')
+                    ->label('Consumido')
+                    ->alignCenter()
+                    ->badge()
+                    ->state(fn (Budget $record): string => $record->usage_percentage.' %')
+                    ->color(fn (Budget $record): string => match (true) {
+                        $record->usage_percentage >= 100 => 'danger',
+                        $record->usage_percentage >= 75 => 'warning',
+                        default => 'success',
+                    }),
                 Tables\Columns\TextColumn::make('start_date')
                     ->label('Fecha de Inicio')
                     ->date()
@@ -109,16 +133,30 @@ class BudgetResource extends Resource
                     ->date()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
+                    ->label('Creado')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('updated_at')
+                    ->label('Actualizado')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
+            ->defaultSort('start_date', 'desc')
             ->filters([
-                //
+                Tables\Filters\SelectFilter::make('user_id')
+                    ->label('Usuario')
+                    ->placeholder('Todos')
+                    ->relationship('user', 'name')
+                    ->searchable()
+                    ->preload(),
+                Tables\Filters\SelectFilter::make('category_id')
+                    ->label('Categoría')
+                    ->placeholder('Todas')
+                    ->relationship('category', 'name')
+                    ->searchable()
+                    ->preload(),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),

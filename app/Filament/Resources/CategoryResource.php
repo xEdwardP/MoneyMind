@@ -3,18 +3,15 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\CategoryResource\Pages;
-use App\Filament\Resources\CategoryResource\RelationManagers;
 use App\Models\Category;
 use Filament\Forms;
-use Filament\Forms\Components\Card;
+use Filament\Forms\Components\Section;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class CategoryResource extends Resource
 {
@@ -28,32 +25,30 @@ class CategoryResource extends Resource
 
     protected static ?string $navigationLabel = 'Categorías';
 
+    public const TYPES = [
+        'ingreso' => 'Ingreso',
+        'gasto' => 'Gasto',
+    ];
+
     public static function form(Form $form): Form
     {
         return $form
             ->schema([
-
-                Card::make('Datos Generales de la Categoría')
+                Section::make('Datos Generales de la Categoría')
                     ->schema([
-                        Forms\Components\Grid::make(2)
-                            ->schema([
-                                Forms\Components\TextInput::make('name')
-                                    ->required()
-                                    ->label('Nombre')
-                                    ->placeholder('Nombre de la categoría')
-                                    ->maxLength(255),
-                                Forms\Components\Select::make('type')
-                                    ->options([
-                                        'ingreso' => 'Ingreso',
-                                        'gasto' => 'Gasto',
-                                    ])
-                                    ->label('Tipo de movimiento')
-                                    ->required(),
-                            ])
-                            ->columns(2),
+                        Forms\Components\TextInput::make('name')
+                            ->required()
+                            ->label('Nombre')
+                            ->placeholder('Nombre de la categoría')
+                            ->maxLength(255)
+                            ->unique(ignoreRecord: true),
+                        Forms\Components\Select::make('type')
+                            ->options(self::TYPES)
+                            ->label('Tipo de movimiento')
+                            ->native(false)
+                            ->required(),
                     ])
-                    ->columns(1)
-                    ->columnSpan(2),
+                    ->columns(2),
             ]);
     }
 
@@ -73,11 +68,18 @@ class CategoryResource extends Resource
                     ->label('Tipo de movimiento')
                     ->alignCenter()
                     ->badge()
-                    ->color(fn ($state) => match ($state) {
+                    ->formatStateUsing(fn (string $state): string => self::TYPES[$state] ?? $state)
+                    ->color(fn (string $state): string => match ($state) {
                         'ingreso' => 'success',
                         'gasto' => 'danger',
+                        default => 'gray',
                     })
                     ->searchable()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('transactions_count')
+                    ->label('Movimientos')
+                    ->counts('transactions')
+                    ->alignCenter()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Creado')
@@ -90,13 +92,11 @@ class CategoryResource extends Resource
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
+            ->defaultSort('name')
             ->filters([
                 SelectFilter::make('type')
                     ->label('Tipo de movimiento')
-                    ->options([
-                        'ingreso' => 'Ingreso',
-                        'gasto' => 'Gasto',
-                    ])
+                    ->options(self::TYPES)
                     ->placeholder('Todos'),
             ])
             ->actions([

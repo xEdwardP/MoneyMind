@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Transaction extends Model
 {
@@ -15,35 +16,54 @@ class Transaction extends Model
         'amount',
         'description',
         'photo',
-        'transaction_date'
+        'transaction_date',
     ];
 
-    public function user()
+    protected function casts(): array
+    {
+        return [
+            'amount' => 'decimal:2',
+            'transaction_date' => 'date',
+        ];
+    }
+
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    public function category()
+    public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
     }
 
-    protected static function booted()
+    protected static function booted(): void
     {
-        static::created(function ($transaction) {
-            if ($transaction->type == 'gasto') {
-                $budget = Budget::where('user_id', $transaction->user_id)
-                    ->where('category_id', $transaction->category_id)
-                    ->whereMonth('start_date', now()->month)
-                    ->whereYear('start_date', now()->year)
-                    ->first();
+        // Crear, editar o borrar un movimiento cambia lo gastado en un presupuesto,
+        // por lo que los tres casos tienen que refrescarlo.
+        static::saved(fn (Transaction $transaction) => $transaction->syncBudgets());
+        static::deleted(fn (Transaction $transaction) => $transaction->syncBudgets());
+    }
 
-                if ($budget) {
-                    // $budget->spentAmount += $transaction->amount;
-                    // $budget->save();
-                    $budget->increment('spentAmount', $transaction->amount);
-                }
-            }
-        });
+    /**
+     * Recalcula los presupuestos afectados por este movimiento. Se toman en cuenta
+     * tanto el usuario/categoría actuales como los anteriores, porque al editar un
+     * movimiento se debe descontar del presupuesto del que salió.
+     */
+    public function syncBudgets(): void
+    {
+        $userIds = array_unique(array_filter([$this->user_id, $this->getOriginal('user_id')]));
+        $categoryIds = array_unique(array_filter([$this->category_id, $this->getOriginal('category_id')]));
+
+        if ($userIds === [] || $categoryIds === []) {
+            return;
+        }
+
+        Budget::query()
+            ->whereIn('user_id', $userIds)
+            ->whereIn('category_id', $categoryIds)
+            ->get()
+            ->each
+            ->recalculateSpentAmount();
     }
 }
